@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimal-ui">
+  <title>F1 FANTASTIC STANDINGS</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300italic,700,700italic">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/milligram/1.4.1/milligram.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jmespath/0.16.0/jmespath.min.js"
+          integrity="sha512-w/sNKK/59oJUi6v+SjgfIijrkFN8Pfv5QFZSV4KvrNMJrlbVM3017ZGNCA2AwZ6PKJzTPxQaDs/TbPcVGnF+pQ=="
+          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+</head>
+<body>
+<main class="wrapper">
+  <section class="container" style="max-width: 80rem;">
+    <h1 id="race" style="text-align: center;">F1 Fantastic Standings</h1>
+
+    <div class="row">
+      <div class="column column-25">
+        <label>
+          Season
+          <select id="season-picker"></select>
+        </label>
+      </div>
+      <div class="column column-75">
+        <label>
+          Round
+          <select id="race-picker"></select>
+        </label>
+      </div>
+    </div>
+
+    <label>
+      Point scoring rule
+      <input type="text" placeholder="25, 20, 15, 13, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1"
+             id="input__points"
+             disabled>
+    </label>
+    <table>
+      <thead>
+      <tr>
+        <th style="text-align: center;">POS</th>
+        <th>DRIVER</th>
+        <th>CAR</th>
+        <th>Fantastic PTS</th>
+        <th>REAL POS</th>
+        <th>REAL PTS</th>
+      </tr>
+      </thead>
+      <tbody id="standings">
+      </tbody>
+    </table>
+  </section>
+</main>
+
+
+<script>
+  /**
+   * F1 Constructor
+   *
+   * @typedef {Object}  F1Constructor
+   * @property {string} constructorId
+   * @property {string} name
+   * @property {string} nationality
+   * @property {string} url           wikipedia URL
+   */
+
+  /**
+   * F1 Driver
+   *
+   * @typedef {Object}  F1Driver
+   * @property {string} driverId
+   * @property {string} code            e.g. TSU, MAX, GAS
+   * @property {string} dateOfBirth
+   * @property {string} familyName
+   * @property {string} givenName
+   * @property {string} nationality
+   * @property {string} permanentNumber
+   * @property {string} url             wikipedia URL
+   */
+
+  /**
+   * Race Result
+   * @typedef {Object}  RaceResult
+   * @property {string}   constructor   F1Constructor ID
+   * @property {string}   driver        F1Driver ID
+   * @property {boolean}  fastestLap
+   * @property {number}   points
+   * @property {number}   position
+   */
+
+  /**
+   * Race
+   *
+   * @typedef {Object}  Race
+   * @property {number}             season
+   * @property {number}             round
+   * @property {string}             name
+   * @property {Array.<RaceResult>} results
+   * @property {Array.<RaceResult>} sprintResults
+   */
+
+  /**
+   * Standings
+   *
+   * @typedef {Object}  Standings
+   * @property {string} driver
+   * @property {string} constructor
+   * @property {number} pos
+   * @property {number} points          this is the point defined by the regulations.
+   * @property {number} fantasticPos
+   * @property {number} fantasticPoints This reflects a great point scoring system.
+   */
+
+  /**
+   * State
+   *
+   * @typedef {Object}  State
+   * @property {Array.<F1Constructor>} constructors
+   * @property {Array.<F1Driver>} drivers
+   * @property {Array.<Race>} raceResults
+   * @property {Array.<Standings>} standings
+   * @property {number} round
+   * @property {Array.<number>} points
+   */
+
+
+  /**
+   * State subscriber
+   *
+   * @name Subscriber
+   * @function
+   * @param {string}  type
+   * @param {State}   state
+   */
+
+  const elmRacePicker = document.getElementById("race-picker");
+  const elmStandings = document.getElementById("standings");
+
+  // ===================================
+  // Constants
+  // ===================================
+
+  const constructorColor = {
+    "alfa": "#c72d4a",
+    "alphatauri": "#5d8ea9",
+    "alpine": "#2292cf",
+    "aston_martin": "#358b74",
+    "ferrari": "#f71536",
+    "haas": "#b5b9bc",
+    "mclaren": "#f37f20",
+    "mercedes": "#6bd1be",
+    "red_bull": "#3670c4",
+    "williams": "#37bddb",
+    "renault": "#fdf300",
+    "racing_point": "#f395c6",
+    "toro_rosso": "#469bff",
+  }
+
+
+  // ===================================
+  // State
+  // ===================================
+  const state = {
+    /**
+     * @type {Object.<string, F1Constructor>}
+     */
+    constructors: {},
+
+    /**
+     * @type {Object.<string, F1Driver>}
+     */
+    drivers: {},
+
+    /**
+     * @type {Array.<Race>}
+     */
+    raceResults: [],
+
+    /**
+     * @type {Array.<Standings>}
+     */
+    standings: [],
+
+    round: 0,
+
+    points: [25, 20, 15, 13, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1],
+
+    _subscribers: [],
+
+    /**
+     * Publish state when state changes.
+     *
+     * @param {Subscriber} subscriber
+     */
+    subscribe(subscriber) {
+      this._subscribers.push(subscriber);
+    },
+
+    /**
+     * @param {string}  type
+     * @private
+     */
+    _publish(type) {
+      console.log(`publish: ${type}`);
+      this._subscribers.forEach(it => it(type, this));
+    },
+
+    /**
+     * Reset the state.
+     *
+     * @param {number | "current"} season  1950 to 2023 or "current"
+     */
+    reset(season) {
+      // Convert Ergast model to state
+      return Promise.all([
+        fetch(`http://ergast.com/api/f1/${season}/results.json?limit=1000&offset=0`)
+            .then(res => res.json()),
+        fetch(`http://ergast.com/api/f1/${season}/sprint.json?limit=1000&offset=0`)
+            .then(res => res.json()),
+      ]).then(json => {
+        this.raceResults = jmespath.search(json, '[].MRData.RaceTable.Races[] \
+                .{\
+                  season: season.to_number(@), \
+                  round: round.to_number(@), \
+                  name: raceName, \
+                  results: Results[].{\
+                    position: position.to_number(@), \
+                    points: points.to_number(@), \
+                    driver: Driver.driverId, \
+                    constructor: Constructor.constructorId, \
+                    fastestLap: FastestLap.rank==`"1"`\
+                  }\
+                  sprintResults: SprintResults[].{\
+                    position: position.to_number(@), \
+                    points: points.to_number(@), \
+                    driver: Driver.driverId, \
+                    constructor: Constructor.constructorId\
+                  }\
+                }');
+        this.raceResults.filter(r => r.sprintResults).forEach(r => r.name = `[SPRINT] ${r.name}`);
+
+        this.constructors = jmespath.search(json[0], 'MRData.RaceTable.Races[].Results[].Constructor').reduce((acc, v) => {
+          acc[v.constructorId] = v;
+          return acc;
+        }, {});
+        this.drivers = jmespath.search(json[0], 'MRData.RaceTable.Races[].Results[].Driver').reduce((acc, v) => {
+          acc[v.driverId] = v;
+          return acc;
+        }, {});
+
+        this._calcPoints(Math.max(...this.raceResults.map(v => v.round)));
+
+        return state;
+      })
+          .then(() => this._publish("season"));
+    },
+
+    /**
+     * Calculate driver standings.
+     *
+     * @param {number}  round
+     * @returns {Array.<Standings>}
+     * @private
+     */
+    _calcPoints(round) {
+      const next = Object.values(
+          this.raceResults.filter(v => v.round <= round)
+              .flatMap(race => (race.results || race.sprintResults).map(r => ({...r, ...race})))
+              .reduce((acc, d) => {
+                const points = acc[d.driver] || [d.driver, d.constructor, 0, 0];
+                points[2] += d.points;
+                points[3] += this.points[d.position - 1] || 0;
+                acc[d.driver] = points;
+
+                // fastest lap point
+                if (d.fastestLap && d.position <= 10 && d.season >= 2019) {
+                  points[3] += 1;
+                }
+                return acc;
+              }, {}))
+          .map(p => {
+            return {
+              driver: p[0],
+              constructor: p[1],
+              points: p[2],
+              fantasticPoints: p[3],
+            }
+          })
+          .sort((l, r) => r.points - l.points)
+          .map((p, i) => {
+            return {...p, pos: i + 1};
+          })
+          .sort((l, r) => r.fantasticPoints - l.fantasticPoints)
+          .map((p, i) => {
+            return {...p, fantasticPos: i + 1};
+          });
+      this.standings = next;
+      return next;
+    },
+
+    changeRound(round) {
+      this.round = round;
+      this._calcPoints(this.round);
+      this._publish("round");
+      return this;
+    },
+
+    driverFullName(driverId) {
+      const d = this.drivers[driverId];
+      return `${d.givenName} ${d.familyName}`;
+    },
+
+    constructorName(constructorId) {
+      return this.constructors[constructorId].name;
+    },
+  };
+
+  // ===================================
+  // DOM
+  // ===================================
+  elmRacePicker.addEventListener("change", ev => {
+    state.changeRound(ev.target.value);
+  });
+
+  function deleteAndAppendChildren(parent, elm) {
+    while (parent.lastChild) {
+      parent.removeChild(parent.lastChild);
+    }
+    parent.appendChild(elm);
+  }
+
+  function createStandingsRow(d) {
+    const tr = document.createElement("tr");
+    const fPos = document.createElement("td");
+    fPos.style.textAlign = "center";
+    const diff = d.pos - d.fantasticPos;
+    fPos.appendChild(document.createTextNode(d.fantasticPos));
+    if (diff !== 0) {
+      const elmDiff = document.createElement("small");
+      elmDiff.appendChild(document.createTextNode(`(${(diff < 0 ? "" : "+")}${diff})`));
+      elmDiff.style.color = diff > 0 ? "#02fc00" : "#df0600";
+      fPos.style.fontWeight = diff > 0 ? "bold" : "none";
+      fPos.appendChild(elmDiff);
+    }
+    tr.appendChild(fPos);
+
+    const driver = document.createElement("td");
+    driver.appendChild(document.createTextNode(state.driverFullName(d.driver)));
+    // driver.style.backgroundImage = `linear-gradient(to right, #fff 25%, ${constructorColor[d.constructor] || "#f1f1f1"})`;
+    driver.style.borderLeft = `0.5rem solid ${constructorColor[d.constructor] || "#f1f1f1"}`;
+    tr.appendChild(driver);
+
+    const car = document.createElement("td");
+    car.appendChild(document.createTextNode(state.constructorName(d.constructor)));
+    tr.appendChild(car);
+
+    const fPts = document.createElement("td");
+    fPts.appendChild(document.createTextNode(d.fantasticPoints));
+    tr.appendChild(fPts);
+
+    const pos = document.createElement("td");
+    pos.appendChild(document.createTextNode(d.pos));
+    tr.appendChild(pos);
+
+    const pts = document.createElement("td");
+    pts.appendChild(document.createTextNode(d.points));
+    tr.appendChild(pts);
+
+    return tr;
+  }
+
+  state.subscribe((type, state) => {
+    if (type !== "season") return;
+    const picker = document.createDocumentFragment();
+    state.raceResults
+        .filter(r => r.results)
+        .forEach(r => {
+          const opt = document.createElement("option");
+          opt.value = r.round;
+          opt.text = `round: ${r.round} ${r.name}`;
+          picker.appendChild(opt);
+        });
+    picker.lastChild.selected = true;
+    deleteAndAppendChildren(elmRacePicker, picker);
+  });
+
+  state.subscribe((type, state) => {
+    if (type !== "season" && type !== "round") return;
+
+    const rows = document.createDocumentFragment();
+    state.standings.forEach(d => {
+      rows.appendChild(createStandingsRow(d));
+    });
+    deleteAndAppendChildren(elmStandings, rows);
+  });
+
+  state.reset("current")
+
+  const seasonPicker = document.createDocumentFragment();
+  for (let i = 2023; i >= 1950; i--) {
+    const opt = document.createElement("option");
+    opt.value = i.toString();
+    opt.text = i.toString();
+    seasonPicker.appendChild(opt);
+  }
+  const elmSeasonPicker = document.getElementById("season-picker");
+  elmSeasonPicker.appendChild(seasonPicker);
+  elmSeasonPicker.addEventListener("change", (ev) => state.reset(ev.target.value));
+</script>
+
+<footer style="width: 100%; text-align: center;">
+  Thanks to <a href="http://ergast.com/mrd">Ergast API</a> for providing great data.<br />
+  And, Thanks to <a href="https://www.youtube.com/watch?v=STu8C3bdvXE">P1 with Matt & Tommy</a>.<br />
+  SourceCode: <a href="https://google.com">@uminus</a>
+</footer>
+</body>
+</html>
