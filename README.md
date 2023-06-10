@@ -4,6 +4,8 @@ This is based on this video.
 
 This application shows standings that reflect other point scoring systems.
 
+[Demo](https://uminus.github.io/f1-fantastic-standings/)
+
 ## License
 MIT
 
